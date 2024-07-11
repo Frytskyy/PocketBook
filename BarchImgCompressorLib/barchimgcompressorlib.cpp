@@ -201,38 +201,63 @@ std::vector<uint8_t> encodeBitmapToCompressedBarch(const Bitmap* bitmap) {
     std::vector<uint8_t> encodedData;
     std::vector<bool> rowIndex;
 
-    // Encode each row
-    for (int y = 0; y < bitmap->height; ++y) {
-        bool isEmptyRow = isRowEmpty(bitmap->data + y * bitmap->width, bitmap->width);
+    int currentByte = 0;
+    int bitCount = 0;
 
+    auto pushBits = [&](int bits, int count)
+    {
+        currentByte = (currentByte << count) | bits;
+        bitCount += count;
+        while (bitCount >= 8)
+        {
+            encodedData.push_back(currentByte >> (bitCount - 8));
+            bitCount -= 8;
+        }
+    };
+
+    for (int y = 0; y < bitmap->height; ++y)
+    {
+        bool isEmptyRow = std::all_of(bitmap->data + y * bitmap->width,
+                                      bitmap->data + (y + 1) * bitmap->width,
+                                      [](uint8_t pixel) { return pixel == 0xFF; });
         rowIndex.push_back(!isEmptyRow);
 
-        if (!isEmptyRow) {
-            std::vector<uint8_t> encodedRow;
-            for (int x = 0; x < bitmap->width; x += 4) {
+        if (!isEmptyRow)
+        {
+            for (int x = 0; x < bitmap->width; x += 4)
+            {
                 uint8_t* pixels = bitmap->data + y * bitmap->width + x;
                 int remainingPixels = std::min(4, bitmap->width - x);
 
-                if (std::all_of(pixels, pixels + remainingPixels, [](uint8_t p) { return p == 0xFF; })) {
-                    encodedRow.push_back(0b00000000);
-                } else if (std::all_of(pixels, pixels + remainingPixels, [](uint8_t p) { return p == 0x00; })) {
-                    encodedRow.push_back(0b10000000);
-                } else {
-                    uint8_t encoded = 0b11000000;
-                    for (int i = 0; i < remainingPixels; ++i) {
-                        encoded |= (pixels[i] & 0b11000000) >> (2 * i + 2);
+                if (std::all_of(pixels, pixels + remainingPixels, [](uint8_t p) { return p == 0xFF; }))
+                {
+                    pushBits(0b0, 1);  // All white
+                } else if (std::all_of(pixels, pixels + remainingPixels, [](uint8_t p) { return p == 0x00; }))
+                {
+                    pushBits(0b10, 2);  // All black
+                } else
+                {
+                    pushBits(0b11, 2);  // Mixed
+                    for (int i = 0; i < remainingPixels; ++i)
+                    {
+                        pushBits(pixels[i], 8);
                     }
-                    encodedRow.push_back(encoded);
                 }
             }
-            encodedData.insert(encodedData.end(), encodedRow.begin(), encodedRow.end());
         }
+    }
+
+    // Flush any remaining bits
+    if (bitCount > 0) {
+        encodedData.push_back(currentByte << (8 - bitCount));
     }
 
     // Prepend row index to encoded data
     std::vector<uint8_t> rowIndexBytes((rowIndex.size() + 7) / 8, 0);
-    for (size_t i = 0; i < rowIndex.size(); ++i) {
-        if (rowIndex[i]) {
+    for (size_t i = 0; i < rowIndex.size(); ++i)
+    {
+        if (rowIndex[i])
+        {
             rowIndexBytes[i / 8] |= (1 << (i % 8));
         }
     }
@@ -267,29 +292,61 @@ Bitmap* decodeBarchEncodedData(const std::vector<uint8_t>& encodedData) {
     }
 
     size_t dataIndex = 2 + rowIndexByteCount;
-    for (int y = 0; y < height; ++y) {
-        if (rowIndex[y]) {
-            for (int x = 0; x < width; x += 4) {
-                if (dataIndex >= encodedData.size()) {
-                    delete[] bitmap->data;
-                    delete bitmap;
-                    return nullptr; // Unexpected end of data
-                }
+    int bitIndex = 0;
 
-                uint8_t encoded = encodedData[dataIndex++];
+    auto readBits = [&](int count) -> int
+    {
+        int result = 0;
+        while (count > 0)
+        {
+            if (dataIndex >= encodedData.size())
+            {
+                throw std::runtime_error("Unexpected end of data");
+            }
+            int availableBits = 8 - bitIndex;
+            int bitsToRead = std::min(count, availableBits);
+            result = (result << bitsToRead) | ((encodedData[dataIndex] >> (availableBits - bitsToRead)) & ((1 << bitsToRead) - 1));
+            bitIndex += bitsToRead;
+            if (bitIndex == 8)
+            {
+                dataIndex++;
+                bitIndex = 0;
+            }
+            count -= bitsToRead;
+        }
+        return result;
+    };
+
+    for (int y = 0; y < height; ++y)
+    {
+        if (rowIndex[y])
+        {
+            for (int x = 0; x < width; x += 4)
+            {
+                int code = readBits(1);
                 int remainingPixels = std::min(4, width - x);
 
-                if ((encoded & 0b11000000) == 0b00000000) {
+                if (code == 0b0)
+                {
                     std::fill_n(bitmap->data + y * width + x, remainingPixels, 0xFF);
-                } else if ((encoded & 0b11000000) == 0b10000000) {
-                    std::fill_n(bitmap->data + y * width + x, remainingPixels, 0x00);
-                } else {
-                    for (int i = 0; i < remainingPixels; ++i) {
-                        bitmap->data[y * width + x + i] = (encoded & (0b11000000 >> (2 * i))) << (2 * i);
+                } else
+                {
+                    int code2 = readBits(1);
+                    if (code2 == 0b0) //full code pattern: 0b10 (four black pixels in a row)
+                    {
+                        std::fill_n(bitmap->data + y * width + x, remainingPixels, 0x00);
+                    } else
+                    {
+                        for (int i = 0; i < remainingPixels; ++i)
+                        {
+                            bitmap->data[(y * width) + x + i] = readBits(8);
+                        }
                     }
                 }
             }
-        } else {
+        } else
+        {
+            //full while row
             std::fill_n(bitmap->data + y * width, width, 0xFF);
         }
     }
