@@ -32,10 +32,29 @@ typedef struct {
 } BITMAPINFOHEADER;
 #pragma pack(pop)
 
-eImgCompressionResult readBMPFile(const std::string& filePath, Bitmap*& bitmap) {
+struct RGBQUAD
+{
+    uint8_t rgbBlue;     // Blue component of the color (0-255)
+    uint8_t rgbGreen;    // Green component of the color (0-255)
+    uint8_t rgbRed;      // Red component of the color (0-255)
+    uint8_t rgbReserved; // Reserved for the dark side (may be alpha? anyway, not needed for this test project)
+
+    uint8_t GetGrayscaleLuminosity() const
+    {
+        // Calculate the grayscale value using the luminosity method
+        uint16_t grayscale = static_cast<uint16_t>(0.2126 * rgbRed + 0.7152 * rgbGreen + 0.0722 * rgbBlue);
+        uint8_t roundedGrayscale = static_cast<uint8_t>(grayscale + 0.5); // Round the grayscale value to the nearest byte
+
+        return roundedGrayscale;
+    }
+};
+
+eImgCompressionResult readBMPFile(const std::string& filePath, Bitmap*& bitmap)
+{
     bitmap = nullptr;
     std::ifstream file(filePath, std::ios::binary);
-    if (!file) {
+    if (!file)
+    {
         return comprResErrorDiskIO; // File not found, like Obi-Wan on Tatooine
     }
 
@@ -44,7 +63,8 @@ eImgCompressionResult readBMPFile(const std::string& filePath, Bitmap*& bitmap) 
 
     // Read the BMP headers
     if (!file.read(reinterpret_cast<char*>(&fileHeader), sizeof(BITMAPFILEHEADER)) ||
-        !file.read(reinterpret_cast<char*>(&infoHeader), sizeof(BITMAPINFOHEADER))) {
+        !file.read(reinterpret_cast<char*>(&infoHeader), sizeof(BITMAPINFOHEADER)))
+    {
         return comprResErrorInvalidInputFileFormat;
     }
 
@@ -52,7 +72,6 @@ eImgCompressionResult readBMPFile(const std::string& filePath, Bitmap*& bitmap) 
     if (fileHeader.bfType != 0x4D42 || infoHeader.biBitCount != 8) {
         return comprResErrorInvalidInputFileFormat; // This is not the file format you're looking for
     }
-    //to-do: we can also check for palette here, for grayscale all RGB should eb equal and sequental from 0 to 255, but yet let's presume all is ok as the time is short for this test task...
 
     // Extract image dimensions
     int width = infoHeader.biWidth;
@@ -63,7 +82,8 @@ eImgCompressionResult readBMPFile(const std::string& filePath, Bitmap*& bitmap) 
     int padding = rowSize - width;
 
     // Allocate memory for the bitmap data
-    try {
+    try
+    {
         bitmap = new Bitmap;
         if (!bitmap) {
             return comprResErrorOutOfRAM;
@@ -71,13 +91,16 @@ eImgCompressionResult readBMPFile(const std::string& filePath, Bitmap*& bitmap) 
         bitmap->width = width;
         bitmap->height = height;
         bitmap->data = new unsigned char[width * height]; //note: result data in not compressed yet!
-        if (!bitmap->data) {
+        if (!bitmap->data)
+        {
             delete bitmap;
             bitmap = nullptr;
             return comprResErrorOutOfRAM;
         }
-    } catch (const std::bad_alloc&) {
-        if (bitmap) {
+    } catch (const std::bad_alloc&)
+    {
+        if (bitmap)
+        {
             delete bitmap;
             bitmap = nullptr;
         }
@@ -118,13 +141,16 @@ eImgCompressionResult readBMPFile(const std::string& filePath, Bitmap*& bitmap) 
 }
 
 // Write BMP file like Luke firing proton torpedoes
-eImgCompressionResult writeBMPFile(const std::string& filePath, const Bitmap* bitmap) {
-    if (!bitmap || !bitmap->data) {
+eImgCompressionResult writeBMPFile(const std::string& filePath, const Bitmap* bitmap)
+{
+    if (!bitmap || !bitmap->data)
+    {
         return comprResErrorOther;
     }
 
     std::ofstream file(filePath, std::ios::binary);
-    if (!file) {
+    if (!file)
+    {
         return comprResErrorDiskIO; // Failed to open file, like a jammed blaster
     }
 
@@ -160,24 +186,29 @@ eImgCompressionResult writeBMPFile(const std::string& filePath, const Bitmap* bi
     }
 
     // Write the grayscale color palette
-    for (int i = 0; i < 256; ++i) {
+    for (int i = 0; i < 256; ++i)
+    {
         uint8_t gray = uint8_t(i);
         if (!file.write(reinterpret_cast<char*>(&gray), 1) ||
             !file.write(reinterpret_cast<char*>(&gray), 1) ||
-            !file.write(reinterpret_cast<char*>(&gray), 1)) {
+            !file.write(reinterpret_cast<char*>(&gray), 1))
+        {
             return comprResErrorDiskIO;
         }
         uint8_t zero = 0;
-        if (!file.write(reinterpret_cast<char*>(&zero), 1)) {
+        if (!file.write(reinterpret_cast<char*>(&zero), 1))
+        {
             return comprResErrorDiskIO;
         }
     }
 
     // Write the pixel data
     std::vector<uint8_t> paddingBytes(padding, 0);
-    for (int y = bitmap->height - 1; y >= 0; --y) {
+    for (int y = bitmap->height - 1; y >= 0; --y)
+    {
         if (!file.write(reinterpret_cast<const char*>(bitmap->data + y * bitmap->width), bitmap->width) ||
-            !file.write(reinterpret_cast<char*>(paddingBytes.data()), padding)) {
+            !file.write(reinterpret_cast<char*>(paddingBytes.data()), padding))
+        {
 
             return comprResErrorDiskIO;
         }
@@ -189,20 +220,37 @@ eImgCompressionResult writeBMPFile(const std::string& filePath, const Bitmap* bi
 // Function to check if a row is empty
 bool isRowEmpty(const unsigned char* row, int width)
 {
-    for (int i = 0; i < width; i++) {
-        if (row[i] != 0xff) {
+    for (int i = 0; i < width; i++)
+    {
+        if (row[i] != 0xff)
+        {
             return false;
         }
     }
     return true;
 }
 
-std::vector<uint8_t> encodeBitmapToCompressedBarch(const Bitmap* bitmap) {
+int GetBitmapWidthInBytes(int bitmapWidth, int bitCount)
+{
+    return ((bitmapWidth * bitCount + 31) / 32) * 4;
+    /*  int nWidthBits = nBitmapWidth * nBitCount;
+    int	nRemainder = nWidthBits % 32;
+
+    if (nRemainder)
+        nWidthBits += 32 - nRemainder;
+
+    return nWidthBits / 8; */
+}
+
+std::vector<uint8_t> encodeBitmapToCompressedBarch(const Bitmap* bitmap)
+{
     std::vector<uint8_t> encodedData;
     std::vector<bool> rowIndex;
 
-    int currentByte = 0;
-    int bitCount = 0;
+    int         currentByte = 0;
+    int         bitCount = 0;
+    const int   bitsPerPixel = 8;
+    const int   alignedWidthInBytes = GetBitmapWidthInBytes(bitmap->width, bitsPerPixel);
 
     auto pushBits = [&](int bits, int count)
     {
@@ -217,22 +265,22 @@ std::vector<uint8_t> encodeBitmapToCompressedBarch(const Bitmap* bitmap) {
 
     for (int y = 0; y < bitmap->height; ++y)
     {
-        bool isEmptyRow = std::all_of(bitmap->data + y * bitmap->width,
-                                      bitmap->data + (y + 1) * bitmap->width,
-                                      [](uint8_t pixel) { return pixel == 0xFF; });
+        uint8_t* pRowPixels = bitmap->data + (y * alignedWidthInBytes);
+        bool     isEmptyRow = isRowEmpty(pRowPixels, bitmap->width);
+
         rowIndex.push_back(!isEmptyRow);
 
         if (!isEmptyRow)
         {
-            for (int x = 0; x < bitmap->width; x += 4)
+            for (int x = 0; x < alignedWidthInBytes; x += 4)
             {
-                uint8_t* pixels = bitmap->data + y * bitmap->width + x;
-                int remainingPixels = std::min(4, bitmap->width - x);
+                uint8_t* pXPixels = pRowPixels + x;
+                int      remainingPixels = std::min(4, alignedWidthInBytes - x);
 
-                if (std::all_of(pixels, pixels + remainingPixels, [](uint8_t p) { return p == 0xFF; }))
+                if (std::all_of(pXPixels, pXPixels + remainingPixels, [](uint8_t p) { return p == 0xFF; }))
                 {
                     pushBits(0b0, 1);  // All white
-                } else if (std::all_of(pixels, pixels + remainingPixels, [](uint8_t p) { return p == 0x00; }))
+                } else if (std::all_of(pXPixels, pXPixels + remainingPixels, [](uint8_t p) { return p == 0x00; }))
                 {
                     pushBits(0b10, 2);  // All black
                 } else
@@ -240,7 +288,9 @@ std::vector<uint8_t> encodeBitmapToCompressedBarch(const Bitmap* bitmap) {
                     pushBits(0b11, 2);  // Mixed
                     for (int i = 0; i < remainingPixels; ++i)
                     {
-                        pushBits(pixels[i], 8);
+                        unsigned char  pixelColorIndex = pXPixels[i];
+
+                        pushBits(pixelColorIndex, 8); //it's not totally ok, but for curent test task we can use the pixelColorIndex as color luminosity
                     }
                 }
             }
@@ -248,7 +298,8 @@ std::vector<uint8_t> encodeBitmapToCompressedBarch(const Bitmap* bitmap) {
     }
 
     // Flush any remaining bits
-    if (bitCount > 0) {
+    if (bitCount > 0)
+    {
         encodedData.push_back(currentByte << (8 - bitCount));
     }
 
@@ -272,27 +323,34 @@ std::vector<uint8_t> encodeBitmapToCompressedBarch(const Bitmap* bitmap) {
     return finalEncodedData;
 }
 
-Bitmap* decodeBarchEncodedData(const std::vector<uint8_t>& encodedData) {
-    if (encodedData.size() < 2) {
+Bitmap* decodeBarchEncodedData(const std::vector<uint8_t>& encodedData)
+{
+    if (encodedData.size() < 2)
+    {
         return nullptr; // Not enough data to decode
     }
 
-    int width = *reinterpret_cast<const int*>(&encodedData[0]);
-    int height = *reinterpret_cast<const int*>(&encodedData[sizeof(int)]);
+    int         width = *reinterpret_cast<const int*>(&encodedData[0]);
+    int         height = *reinterpret_cast<const int*>(&encodedData[sizeof(int)]);
+    const int   bitsPerPixel = 8;
+    const int   alignedWidthInBytes = GetBitmapWidthInBytes(width, bitsPerPixel);
 
-    Bitmap* bitmap = new Bitmap;
+    Bitmap*     bitmap = new Bitmap;
+
     bitmap->width = width;
     bitmap->height = height;
-    bitmap->data = new unsigned char[width * height];
+    bitmap->data = new unsigned char[alignedWidthInBytes * height];
 
-    std::vector<bool> rowIndex(height);
-    int rowIndexByteCount = (height + 7) / 8;
-    for (int i = 0; i < height; ++i) {
+    std::vector<bool>   rowIndex(height);
+    int                 rowIndexByteCount = (height + 7) / 8;
+
+    for (int i = 0; i < height; ++i)
+    {
         rowIndex[i] = (encodedData[(sizeof(int) * 2) + i / 8] & (1 << (i % 8))) != 0;
     }
 
-    size_t dataIndex = 2 + rowIndexByteCount;
-    int bitIndex = 0;
+    size_t  dataIndex = (sizeof(int) * 2) + rowIndexByteCount;
+    int     bitIndex = 0;
 
     auto readBits = [&](int count) -> int
     {
@@ -319,27 +377,29 @@ Bitmap* decodeBarchEncodedData(const std::vector<uint8_t>& encodedData) {
 
     for (int y = 0; y < height; ++y)
     {
+        uint8_t* pRowPixels = bitmap->data + (y * alignedWidthInBytes);
+
         if (rowIndex[y])
         {
-            for (int x = 0; x < width; x += 4)
+            for (int x = 0; x < alignedWidthInBytes; x += 4)
             {
                 int code = readBits(1);
-                int remainingPixels = std::min(4, width - x);
+                int remainingPixels = std::min(4, alignedWidthInBytes - x);
 
                 if (code == 0b0)
                 {
-                    std::fill_n(bitmap->data + y * width + x, remainingPixels, 0xFF);
+                    std::fill_n(pRowPixels + x, remainingPixels, 0xFF);
                 } else
                 {
                     int code2 = readBits(1);
                     if (code2 == 0b0) //full code pattern: 0b10 (four black pixels in a row)
                     {
-                        std::fill_n(bitmap->data + y * width + x, remainingPixels, 0x00);
+                        std::fill_n(pRowPixels + x, remainingPixels, 0x00);
                     } else
                     {
                         for (int i = 0; i < remainingPixels; ++i)
                         {
-                            bitmap->data[(y * width) + x + i] = readBits(8);
+                            pRowPixels[x + i] = readBits(8);
                         }
                     }
                 }
@@ -347,7 +407,7 @@ Bitmap* decodeBarchEncodedData(const std::vector<uint8_t>& encodedData) {
         } else
         {
             //full while row
-            std::fill_n(bitmap->data + y * width, width, 0xFF);
+            std::fill_n(pRowPixels, alignedWidthInBytes, 0xFF);
         }
     }
 
@@ -361,11 +421,13 @@ void freeBitmapMemory(Bitmap* bitmap) {
     }
 }
 
-eImgCompressionResult encodeBarchBitmap(const std::string& inputBMPFilePath, const std::string& outBarchFilePath) {
-    Bitmap* bitmap = nullptr;
-    eImgCompressionResult fileReadResult = readBMPFile(inputBMPFilePath, bitmap);
+eImgCompressionResult encodeBarchBitmap(const std::string& inputBMPFilePath, const std::string& outBarchFilePath)
+{
+    Bitmap*                 bitmap = nullptr;
+    eImgCompressionResult   fileReadResult = readBMPFile(inputBMPFilePath, bitmap);
 
-    if (fileReadResult != comprResOk) {
+    if (fileReadResult != comprResOk)
+    {
         return fileReadResult;
     }
 
@@ -373,36 +435,45 @@ eImgCompressionResult encodeBarchBitmap(const std::string& inputBMPFilePath, con
     freeBitmapMemory(bitmap);
 
     std::ofstream outFile(outBarchFilePath, std::ios::binary);
-    if (!outFile) {
+    if (!outFile)
+    {
         return comprResErrorDiskIO;
     }
 
     outFile.write(reinterpret_cast<char*>(encodedData.data()), encodedData.size());
-    if (!outFile) {
+    if (!outFile)
+    {
         return comprResErrorDiskIO;
     }
 
     return comprResOk;
 }
 
-// Decode Barch to BMP like R2-D2 projecting a hologram
-eImgCompressionResult decodeBarchBitmap(const std::string& inputBarchFilePath, const std::string& outBMPFilePath) {
+eImgCompressionResult decodeBarchBitmap(const std::string& inputBarchFilePath, const std::string& outBMPFilePath)
+{
     std::ifstream inFile(inputBarchFilePath, std::ios::binary);
-    if (!inFile) {
+
+    if (!inFile)
+    {
         return comprResErrorDiskIO;
     }
 
     std::vector<uint8_t> encodedData((std::istreambuf_iterator<char>(inFile)), std::istreambuf_iterator<char>());
-    if (encodedData.empty()) {
+
+    if (encodedData.empty())
+    {
         return comprResErrorInvalidInputFileFormat;
     }
 
     Bitmap* bitmap = decodeBarchEncodedData(encodedData);
-    if (!bitmap) {
+
+    if (!bitmap)
+    {
         return comprResErrorInvalidInputFileFormat;
     }
 
     eImgCompressionResult writeResult = writeBMPFile(outBMPFilePath, bitmap);
+
     freeBitmapMemory(bitmap);
 
     return writeResult;
