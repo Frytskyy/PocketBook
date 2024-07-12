@@ -1,23 +1,31 @@
-#include "mainwindow.h"
-
-#include <QApplication>
-#include <QLocale>
-#include <QTranslator>
+#include <QGuiApplication>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include "filemodel.h"
 
 int main(int argc, char *argv[])
 {
-    QApplication a(argc, argv);
+    QGuiApplication app(argc, argv);
 
-    QTranslator translator;
-    const QStringList uiLanguages = QLocale::system().uiLanguages();
-    for (const QString &locale : uiLanguages) {
-        const QString baseName = "ImgCompressor_" + QLocale(locale).name();
-        if (translator.load(":/i18n/" + baseName)) {
-            a.installTranslator(&translator);
-            break;
-        }
+    QQmlApplicationEngine engine;
+
+    FileModel fileModel;
+    engine.rootContext()->setContextProperty("fileModel", &fileModel);
+
+    // command line handling, the user may provide a path to workw ith as a parameter
+    QString directoryPath = QGuiApplication::applicationDirPath();
+    if (argc > 1)
+    {
+        QString arg = QString::fromLocal8Bit(argv[1]);
+        QDir    dir(arg);
+
+        if (dir.exists())
+            directoryPath = arg;
     }
-    MainWindow w;
-    w.show();
-    return a.exec();
+    fileModel.loadDirectory(directoryPath);
+
+    const QUrl url(QStringLiteral("qrc:/main.qml"));
+    engine.load(url);
+
+    return app.exec();
 }
