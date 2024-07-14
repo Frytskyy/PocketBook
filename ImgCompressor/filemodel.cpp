@@ -1,10 +1,12 @@
 #include "filemodel.h"
+#include "customerrordialog.h"
+#include <QCoreApplication>
 #include <QRunnable>
 #include <QDebug>
 #include <QDir>
 #include <QMessageBox>
 #include <QLibrary>
-#include <QCoreApplication>
+#include <QtAssert>
 
 
 ///////////////////////////////////////////////
@@ -21,7 +23,7 @@ typedef eImgCompressionResult (*encodeBarchBitmapFunc)(const std::string&, const
 typedef eImgCompressionResult (*decodeBarchBitmapFunc)(const std::string&, const std::string&);
 
 
-QLibrary g_barchLib;
+QLibrary              g_barchLib;
 decodeBarchBitmapFunc g_encodeBarchBitmapFunc = nullptr;
 decodeBarchBitmapFunc g_decodeBarchBitmapFunc = nullptr;
 
@@ -100,15 +102,22 @@ static eImgCompressionResult decodeBarchBitmapWrapper(const std::string& inputBa
     return g_decodeBarchBitmapFunc(inputBarchFilePath, outBMPFilePath);
 }
 
+using namespace BarchImgCompressorDecompressor;
+
+typedef eImgCompressionResult (*encodeBarchBitmapFunc)(const std::string&, const std::string&);
+typedef eImgCompressionResult (*decodeBarchBitmapFunc)(const std::string&, const std::string&);
+
 
 ///////////////////////////////////////////////
 //
 //     class FileModel
 //
 
+
 FileModel::FileModel(QObject *parent)
     : QAbstractListModel(parent)
 {
+    m_threadPool.setMaxThreadCount(3); //let's allow some parallel threds, but not too many (in assesment it's not critical, but let's presume it's for heavy threads that require a lot of resources)
 }
 
 int FileModel::rowCount(const QModelIndex &parent) const
@@ -127,13 +136,13 @@ QVariant FileModel::data(const QModelIndex &index, int role) const
 
     switch (role) {
     case NameRole:
-        return item.name;
+        return item.m_name;
     case SizeRole:
-        return item.size;
+        return item.m_size;
     case SizeStrRole:
-        return item.size_str;
+        return item.m_size_str;
     case StateStrRole:
-        return item.state_str;
+        return item.m_state_str;
     default:
         return QVariant();
     }
@@ -181,6 +190,9 @@ void FileModel::loadDirectory(const QString &path)
         m_files.append({fileInfo.fileName(), fileInfo.size(), ConvertSizeToStr(fileInfo.size()), ""});
     }
 
+    if (m_files.empty())
+        m_files.append({"", -1, " Empty Folder ", ""}); //add empty entry to show "Empty Folder" row
+
     endResetModel();
 }
 
@@ -190,13 +202,19 @@ void FileModel::processFile(int index)
         return;
 
     const FileItem  &item = m_files.at(index);
-    QString         filePath = QDir::currentPath() + "/" + item.name;
+    QString         filePath = QDir::currentPath() + "/" + item.m_name;
 
-    if (item.name.endsWith(".bmp")) {
+    if (item.m_size == -1)
+    {
+        //special case for row which says "Empty Folder", do nothing
+    } else if (item.m_name.endsWith(".bmp"))
+    {
         encodeFile(filePath, index);
-    } else if (item.name.endsWith(".barch")) {
+    } else if (item.m_name.endsWith(".barch"))
+    {
         decodeFile(filePath, index);
-    } else {
+    } else
+    {
         updateFileState(index, "Unknown file type");
     }
 }
@@ -214,15 +232,28 @@ void FileModel::encodeFile(const QString &filePath, int fileIndex)
     public:
 
         EncodeTask(FileModel *model, const QString &filePath, int index)
-            : m_model(model), m_filePath(filePath), m_index(index) {}
+            : m_model(model), m_filePath(filePath), m_index(index) { setAutoDelete(true); }
 
         void run() override
         {
-            m_model->updateFileState(m_index, "Encoding...");
+            QString   outFileName = m_filePath + ".packed.barch";
+            QFileInfo outFileInfo(outFileName);
 
-            encodeBarchBitmapWrapper(m_filePath.toStdString(), m_filePath.toStdString() + ".packed.barch");
+            QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
+                                      Q_ARG(int, m_index), Q_ARG(QString, "Encoding..."));
 
-            m_model->updateFileState(m_index, "Encoded!");
+            encodeBarchBitmapWrapper(m_filePath.toStdString(), outFileName.toStdString());
+            for (int percent = 0; percent <= 100; percent += 10)
+            {
+                //tmp: to illustrate that parallel processing is enabled, otherwise it would be too fast to notice anything in a blink of an eye
+                QThread::msleep(400);
+
+                QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
+                                          Q_ARG(int, m_index), Q_ARG(QString, "Encoding... " + QString::number(percent) + "%"));
+            }
+
+            QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
+                                      Q_ARG(int, m_index), Q_ARG(QString, "Encoded!" + outFileInfo.fileName()));
         }
 
     private:
@@ -245,28 +276,45 @@ void FileModel::decodeFile(const QString &filePath, int fileIndex)
 
         void run() override
         {
-            m_model->updateFileState(m_index, "Decoding...");
+            //tmp, for debugging: qDebug() << "DecodeTask::run is running in thread: " << QThread::currentThreadId();
+            QString   outFileName = m_filePath + ".unpacked.bmp";
+            QFileInfo outFileInfo(outFileName);
 
-            decodeBarchBitmapWrapper(m_filePath.toStdString(), m_filePath.toStdString() + ".unpacked.bmp");
+            QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
+                                      Q_ARG(int, m_index), Q_ARG(QString, "Decoding..."));
 
-            m_model->updateFileState(m_index, "Decoded!");
+            decodeBarchBitmapWrapper(m_filePath.toStdString(), outFileName.toStdString());
+            for (int percent = 0; percent <= 100; percent += 10)
+            {
+                //tmp: to illustrate that parallel processing is enabled, otherwise it would be too fast to notice anything in a blink of an eye
+                QThread::msleep(400);
+                QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
+                                          Q_ARG(int, m_index), Q_ARG(QString, "Decoding... " + QString::number(percent) + "%"));
+            }
+
+            QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
+                                      Q_ARG(int, m_index), Q_ARG(QString, "Decoded!" + outFileInfo.fileName()));
         }
 
     private:
+
         FileModel  *m_model;
         QString     m_filePath;
         int         m_index;
     };
 
+    //tmp, for debugging: qDebug() << "Maximum thread count:" << QThreadPool::globalInstance()->maxThreadCount();
+    //tmp, for debugging: qDebug() << "FileModel is running in thread: " << QThread::currentThreadId();
+
     m_threadPool.start(new DecodeTask(this, filePath, fileIndex));
 }
 
-void FileModel::updateFileState(int fileIndex, const QString &state)
+void FileModel::updateFileState(int fileIndex, QString state)
 {
     if (fileIndex < 0 || fileIndex >= m_files.size())
         return;
 
-    m_files[fileIndex].state_str = state;
+    m_files[fileIndex].m_state_str = state;
 
     beginResetModel();
     endResetModel();
@@ -274,8 +322,8 @@ void FileModel::updateFileState(int fileIndex, const QString &state)
     m_updateCounter ++;
     emit updateCounterChanged();
 
-/*  QModelIndex modelIndex = createIndex(fileIndex, 0);
-
-    m_updateCounter ++;
-    emit dataChanged(modelIndex, modelIndex, {StateStrRole}); */
+/*
+    QModelIndex index = createIndex(fileIndex, 0);
+    emit dataChanged(index, index, {StateStrRole});
+*/
 }

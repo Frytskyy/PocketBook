@@ -12,14 +12,14 @@ class FileModel : public QAbstractListModel
 
 public:
 
-    enum Roles
+    enum eRoles
     {
         NameRole = Qt::UserRole + 1,
         SizeRole,
         SizeStrRole,
         StateStrRole
     };
-    Q_ENUM(Roles)
+    Q_ENUM(eRoles)
 
     explicit         FileModel(QObject *parent = nullptr);
 
@@ -27,10 +27,10 @@ public:
     QVariant         data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
 
-    Q_INVOKABLE void loadDirectory(const QString &path);
+    void             loadDirectory(const QString &path);
     Q_INVOKABLE void processFile(int index);
 
-    void             updateFileState(int fileIndex, const QString &state);
+    Q_INVOKABLE void updateFileState(int fileIndex, QString state);
     int              updateCounter() const { return m_updateCounter; }
 
 signals:
@@ -41,10 +41,10 @@ private:
 
     struct FileItem
     {
-        QString     name;
-        qint64      size;
-        QString     size_str;
-        QString     state_str;
+        QString     m_name;
+        qint64      m_size;
+        QString     m_size_str;
+        QString     m_state_str;
     };
 
     QList<FileItem> m_files;
