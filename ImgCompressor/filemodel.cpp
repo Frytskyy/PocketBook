@@ -222,6 +222,8 @@ void FileModel::processFile(int index)
     } else
     {
         updateFileState(index, "Unknown file type");
+
+        showErrorDialog("Unknown file type", "File path: " + filePath);
     }
 }
 
@@ -259,6 +261,9 @@ void FileModel::encodeFile(const QString &filePath, int fileIndex)
                     QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
                                               Q_ARG(int, m_index), Q_ARG(QString, "Encoding... " + QString::number(percent) + "%"));
                 }
+
+                QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
+                                          Q_ARG(int, m_index), Q_ARG(QString, "Encoded! " + outFileInfo.fileName()));
             } else
             {
                 //Error, show dialog box, as per assesmnt description
@@ -266,10 +271,10 @@ void FileModel::encodeFile(const QString &filePath, int fileIndex)
 
                 QMetaObject::invokeMethod(m_pModel, "showErrorDialog",Qt::QueuedConnection,
                                           Q_ARG(QString, "Image ecoding failed"), Q_ARG(QString, msg));
-            }
 
-            QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
-                                      Q_ARG(int, m_index), Q_ARG(QString, "Encoded! " + outFileInfo.fileName()));
+                QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
+                                          Q_ARG(int, m_index), Q_ARG(QString, "ERROR: Encode failed. " + msg));
+            }
         }
 
     private:
@@ -310,6 +315,9 @@ void FileModel::decodeFile(const QString &filePath, int fileIndex)
                     QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
                                               Q_ARG(int, m_index), Q_ARG(QString, "Decoding... " + QString::number(percent) + "%"));
                 }
+
+                QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
+                                          Q_ARG(int, m_index), Q_ARG(QString, "Decoded! " + outFileInfo.fileName()));
             } else
             {
                 //Error, show dialog box, as per assesmnt description
@@ -317,10 +325,10 @@ void FileModel::decodeFile(const QString &filePath, int fileIndex)
 
                 QMetaObject::invokeMethod(m_pModel, "showErrorDialog",Qt::QueuedConnection,
                                           Q_ARG(QString, "Image decoding failed"), Q_ARG(QString, msg));
-            }
 
-            QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
-                                      Q_ARG(int, m_index), Q_ARG(QString, "Decoded! " + outFileInfo.fileName()));
+                QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
+                                          Q_ARG(int, m_index), Q_ARG(QString, "ERROR: Decode failed. " + msg));
+            }
         }
 
     private:
