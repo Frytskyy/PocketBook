@@ -1,36 +1,80 @@
 #include "customerrordialog.h"
-#include <QVBoxLayout>
-#include <QLabel>
-#include <QPushButton>
-#include <QWidget>
+#include <qtimer>
+#include <QQuickWindow>
 
 
 /////////////////////////////////
 //
-//  class ErrorDialog
+//  class CustomErrorDialog
 //
 
-CustomErrorDialog::CustomErrorDialog(QWidget *parent, const QString& title, const QString& msg) :
-    QDialog(parent)
+CustomErrorDialog::CustomErrorDialog(QQmlEngine *pQMLEngine, QObject *pParentObj) :
+    QObject(pParentObj),
+    m_pQMLEngine(pQMLEngine),
+    m_pDialogObject(nullptr)
 {
-    setWindowTitle(title);
+    m_pComponent = new QQmlComponent(m_pQMLEngine, QUrl("qrc:/CustomErrorDialog.qml"), this);
+}
 
-    QVBoxLayout *layout = new QVBoxLayout(this);
-    QLabel      *label = new QLabel(msg, this);
-    QPushButton *okButton = new QPushButton("Ok", this);
+CustomErrorDialog::~CustomErrorDialog()
+{
+    cleanup();
+}
 
-    connect(okButton, &QPushButton::clicked, this, &QDialog::accept);
+void CustomErrorDialog::show(const QString& title, const QString& msg)
+{
+    if (m_pComponent->isReady())
+    {
+        Q_ASSERT(m_pDialogObject == nullptr);
+        m_pDialogObject = m_pComponent->create();
 
-    // Add unique feedback on button press
-    connect(okButton, &QPushButton::pressed, [okButton]() {
-        okButton->setStyleSheet("background-color: #B0B0B0;");
-    });
-    connect(okButton, &QPushButton::released, [okButton]() {
-        okButton->setStyleSheet("");
-    });
+        if (m_pDialogObject)
+        {
+            QString captionStr = "Error";
 
-    layout->addWidget(label);
-    layout->addWidget(okButton);
+            //m_pDialogObject->setProperty("WM_CLASS", QByteArray(title).constData());
+            m_pDialogObject->setProperty("title", title);
+            m_pDialogObject->setProperty("message", msg);
+            QMetaObject::invokeMethod(m_pDialogObject, "show");
 
-    setLayout(layout);
+            // VMF: Set the title after a short delay, yet hard to say why it works this way, anyway, it works for now, for serious project would be better to impelment it in a smarter way
+            QObject *pDialogObject = m_pDialogObject;
+            QTimer::singleShot(100, [pDialogObject, captionStr]() {
+                QQuickWindow *pWindow = qobject_cast<QQuickWindow*>(pDialogObject);
+                if (pWindow)
+                {
+                    pWindow->setTitle(captionStr);
+                }
+            });
+
+            // Connect dialog closure to cleanup
+            connect(m_pDialogObject, SIGNAL(accepted()), this, SLOT(cleanup()));
+            connect(m_pDialogObject, SIGNAL(rejected()), this, SLOT(cleanup()));
+        }
+    }
+    else
+    {
+        // Print out errors if the component is not ready (tmp, for debugging)
+        Q_ASSERT(false); //must never happen, debug using the loop below
+        const auto errors = m_pComponent->errors();
+        for (const auto& error : errors)
+        {
+            qDebug() << error.toString();
+        }
+
+        // If we couldn't create the dialog, we should self-destruct
+        deleteLater();
+    }
+}
+
+void CustomErrorDialog::cleanup()
+{
+    if (m_pDialogObject)
+    {
+        m_pDialogObject->deleteLater();
+        m_pDialogObject = nullptr;
+    }
+
+    // Self-destruct after cleanup
+    this->deleteLater();
 }

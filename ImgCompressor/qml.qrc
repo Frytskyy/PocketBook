@@ -1,6 +1,6 @@
 <RCC>
     <qresource prefix="/">
         <file>main.qml</file>
-        <file>ErrorDialog.qml</file>
+        <file>CustomErrorDialog.qml</file>
     </qresource>
 </RCC>

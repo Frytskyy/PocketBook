@@ -12,7 +12,7 @@ Window {
         anchors.fill: parent
         model: fileModel
         delegate: Rectangle {
-            width: parent.width
+            width: listView.width
             height: 40
             color: index % 2 ? "#f0f0f0" : "white"
 
@@ -33,28 +33,5 @@ Window {
             }
         }
 
-        Connections {
-            target: fileModel
-            function onDataChanged() {
-                listView.forceLayout()
-            }
-        }
-
-        property int updateCounter: fileModel.updateCounter
-        onUpdateCounterChanged: {
-            listView.forceLayout()
-        }
-    }
-
-    ErrorDialog {
-        id: errorDialog
-    }
-
-    Connections {
-        target: fileModel
-        function onError(message) {
-            errorDialog.errorMessage = message
-            errorDialog.open()
-        }
     }
 }

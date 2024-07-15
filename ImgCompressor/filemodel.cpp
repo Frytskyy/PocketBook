@@ -1,6 +1,7 @@
 #include "filemodel.h"
 #include "customerrordialog.h"
 #include <QCoreApplication>
+#include <QQuickWindow>
 #include <QRunnable>
 #include <QDebug>
 #include <QDir>
@@ -114,9 +115,11 @@ typedef eImgCompressionResult (*decodeBarchBitmapFunc)(const std::string&, const
 //
 
 
-FileModel::FileModel(QObject *parent)
-    : QAbstractListModel(parent)
+FileModel::FileModel(QQmlEngine* pQMLEngine, QObject* pParentObj) :
+    QAbstractListModel(pParentObj),
+    m_pQMLEngine(pQMLEngine)
 {
+    Q_ASSERT(m_pQMLEngine); //nust be not null
     m_threadPool.setMaxThreadCount(3); //let's allow some parallel threds, but not too many (in assesment it's not critical, but let's presume it's for heavy threads that require a lot of resources)
 }
 
@@ -204,6 +207,9 @@ void FileModel::processFile(int index)
     const FileItem  &item = m_files.at(index);
     QString         filePath = QDir::currentPath() + "/" + item.m_name;
 
+    if (!item.m_state_str.isEmpty())
+        return; //do not process file processing twice. All clicked files will have status forever after
+
     if (item.m_size == -1)
     {
         //special case for row which says "Empty Folder", do nothing
@@ -232,33 +238,43 @@ void FileModel::encodeFile(const QString &filePath, int fileIndex)
     public:
 
         EncodeTask(FileModel *model, const QString &filePath, int index)
-            : m_model(model), m_filePath(filePath), m_index(index) { setAutoDelete(true); }
+            : m_pModel(model), m_filePath(filePath), m_index(index) { setAutoDelete(true); }
 
         void run() override
         {
             QString   outFileName = m_filePath + ".packed.barch";
             QFileInfo outFileInfo(outFileName);
 
-            QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
+            QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
                                       Q_ARG(int, m_index), Q_ARG(QString, "Encoding..."));
 
-            encodeBarchBitmapWrapper(m_filePath.toStdString(), outFileName.toStdString());
-            for (int percent = 0; percent <= 100; percent += 10)
+            eImgCompressionResult   result = encodeBarchBitmapWrapper(m_filePath.toStdString(), outFileName.toStdString());
+            if (result == comprResOk)
             {
-                //tmp: to illustrate that parallel processing is enabled, otherwise it would be too fast to notice anything in a blink of an eye
-                QThread::msleep(400);
+                for (int percent = 0; percent <= 100; percent += 10)
+                {
+                    //tmp: to illustrate that parallel processing is enabled, otherwise it would be too fast to notice anything in a blink of an eye
+                    QThread::msleep(400);
 
-                QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
-                                          Q_ARG(int, m_index), Q_ARG(QString, "Encoding... " + QString::number(percent) + "%"));
+                    QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
+                                              Q_ARG(int, m_index), Q_ARG(QString, "Encoding... " + QString::number(percent) + "%"));
+                }
+            } else
+            {
+                //Error, show dialog box, as per assesmnt description
+                QString msg("Cannot convert image " + m_filePath + " to " + outFileName + ". Error code: " + QString::number(result));
+
+                QMetaObject::invokeMethod(m_pModel, "showErrorDialog",Qt::QueuedConnection,
+                                          Q_ARG(QString, "Image ecoding failed"), Q_ARG(QString, msg));
             }
 
-            QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
-                                      Q_ARG(int, m_index), Q_ARG(QString, "Encoded!" + outFileInfo.fileName()));
+            QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
+                                      Q_ARG(int, m_index), Q_ARG(QString, "Encoded! " + outFileInfo.fileName()));
         }
 
     private:
 
-        FileModel  *m_model;
+        FileModel  *m_pModel;
         QString     m_filePath;
         int         m_index;
     };
@@ -272,33 +288,44 @@ void FileModel::decodeFile(const QString &filePath, int fileIndex)
     {
     public:
         DecodeTask(FileModel *model, const QString &filePath, int index)
-            : m_model(model), m_filePath(filePath), m_index(index) {}
+            : m_pModel(model), m_filePath(filePath), m_index(index) {}
 
         void run() override
         {
             //tmp, for debugging: qDebug() << "DecodeTask::run is running in thread: " << QThread::currentThreadId();
+
             QString   outFileName = m_filePath + ".unpacked.bmp";
             QFileInfo outFileInfo(outFileName);
 
-            QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
+            QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
                                       Q_ARG(int, m_index), Q_ARG(QString, "Decoding..."));
 
-            decodeBarchBitmapWrapper(m_filePath.toStdString(), outFileName.toStdString());
-            for (int percent = 0; percent <= 100; percent += 10)
+            eImgCompressionResult   result = decodeBarchBitmapWrapper(m_filePath.toStdString(), outFileName.toStdString());
+            if (result == comprResOk)
             {
-                //tmp: to illustrate that parallel processing is enabled, otherwise it would be too fast to notice anything in a blink of an eye
-                QThread::msleep(400);
-                QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
-                                          Q_ARG(int, m_index), Q_ARG(QString, "Decoding... " + QString::number(percent) + "%"));
+                for (int percent = 0; percent <= 100; percent += 10)
+                {
+                    //tmp: to illustrate that parallel processing is enabled, otherwise it would be too fast to notice anything in a blink of an eye
+                    QThread::msleep(400);
+                    QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
+                                              Q_ARG(int, m_index), Q_ARG(QString, "Decoding... " + QString::number(percent) + "%"));
+                }
+            } else
+            {
+                //Error, show dialog box, as per assesmnt description
+                QString msg("Cannot convert image " + m_filePath + " to " + outFileName + ". Error code: " + QString::number(result));
+
+                QMetaObject::invokeMethod(m_pModel, "showErrorDialog",Qt::QueuedConnection,
+                                          Q_ARG(QString, "Image decoding failed"), Q_ARG(QString, msg));
             }
 
-            QMetaObject::invokeMethod(m_model, "updateFileState",  Qt::QueuedConnection,
-                                      Q_ARG(int, m_index), Q_ARG(QString, "Decoded!" + outFileInfo.fileName()));
+            QMetaObject::invokeMethod(m_pModel, "updateFileState",  Qt::QueuedConnection,
+                                      Q_ARG(int, m_index), Q_ARG(QString, "Decoded! " + outFileInfo.fileName()));
         }
 
     private:
 
-        FileModel  *m_model;
+        FileModel  *m_pModel;
         QString     m_filePath;
         int         m_index;
     };
@@ -318,12 +345,9 @@ void FileModel::updateFileState(int fileIndex, QString state)
 
     beginResetModel();
     endResetModel();
+}
 
-    m_updateCounter ++;
-    emit updateCounterChanged();
-
-/*
-    QModelIndex index = createIndex(fileIndex, 0);
-    emit dataChanged(index, index, {StateStrRole});
-*/
+void FileModel::showErrorDialog(QString title, QString message)
+{
+    SHOW_ERROR_MSG(title, message, m_pQMLEngine, this);
 }

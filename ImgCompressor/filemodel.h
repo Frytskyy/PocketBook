@@ -4,11 +4,13 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QThreadPool>
+#include <QQmlEngine>
+
 
 class FileModel : public QAbstractListModel
 {
     Q_OBJECT
-    Q_PROPERTY(int updateCounter READ updateCounter NOTIFY updateCounterChanged)
+    //Q_PROPERTY(int updateCounter READ updateCounter NOTIFY updateCounterChanged)
 
 public:
 
@@ -21,7 +23,7 @@ public:
     };
     Q_ENUM(eRoles)
 
-    explicit         FileModel(QObject *parent = nullptr);
+    explicit         FileModel(QQmlEngine* pQMLEngine, QObject* pParentObj);
 
     int              rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant         data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
@@ -31,11 +33,10 @@ public:
     Q_INVOKABLE void processFile(int index);
 
     Q_INVOKABLE void updateFileState(int fileIndex, QString state);
-    int              updateCounter() const { return m_updateCounter; }
 
-signals:
+    QQmlEngine*      getEngine() const { return m_pQMLEngine; }
 
-    void             updateCounterChanged();
+    Q_INVOKABLE void showErrorDialog(QString title, QString message);
 
 private:
 
@@ -47,10 +48,12 @@ private:
         QString     m_state_str;
     };
 
+    QQmlEngine     *m_pQMLEngine;
     QList<FileItem> m_files;
     QThreadPool     m_threadPool;
-    int             m_updateCounter = 0;
 
     void            encodeFile(const QString &filePath, int fileIndex);
     void            decodeFile(const QString &filePath, int fileIndex);
 };
+
+
